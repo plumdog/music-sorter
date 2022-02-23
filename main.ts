@@ -7,11 +7,6 @@ import walk from 'walkdir';
 
 import { ArgumentsError } from './errors';
 
-interface RunProps {
-    verbose: boolean;
-    targetDir: string;
-}
-
 type LogFn = (msg: string) => void;
 
 const getLogger = (verbose: boolean): LogFn => {
@@ -21,8 +16,6 @@ const getLogger = (verbose: boolean): LogFn => {
         }
     };
 };
-
-let log: LogFn;
 
 interface Mp3 {
     artistName: string;
@@ -83,14 +76,23 @@ const safeFilePartName = (name: string): string => {
     return name.replace(/\//g, '');
 };
 
-export const run = async (props: RunProps): Promise<void> => {
-    log = getLogger(props.verbose);
+interface RunProps {
+    verbose: boolean;
+    targetDir: string;
+}
 
-    const targetDirFullPath = path.resolve(props.targetDir);
+interface Context {
+    props: RunProps;
+    logger: LogFn;
+}
 
-    log(`Starting targeting dir ${targetDirFullPath}`);
+interface Plan {
+    knownMoves: Record<string, string>;
+    unknownMoves: Array<string>;
+}
 
-    const result = await walk.async(targetDirFullPath, { return_object: true });
+export const generatePlan = async (ctx: Context): Promise<Plan> => {
+    const result = await walk.async(ctx.props.targetDir, { return_object: true });
 
     const filesOnly: Array<string> = [];
 
@@ -114,15 +116,20 @@ export const run = async (props: RunProps): Promise<void> => {
             unknownMoves.push(filepath);
         } else {
             const filename = typeof mp3.trackNumber === 'undefined' ? `${mp3.trackName}.mp3` : `${String(mp3.trackNumber).padStart(2, '0')} - ${mp3.trackName}.mp3`;
-            knownMoves[filepath] = path.join(targetDirFullPath, safeFilePartName(mp3.artistName), safeFilePartName(mp3.albumName), safeFilePartName(filename));
+            knownMoves[filepath] = path.join(ctx.props.targetDir, safeFilePartName(mp3.artistName), safeFilePartName(mp3.albumName), safeFilePartName(filename));
         }
     }
 
-    log(`Found ${Object.keys(knownMoves).length} files`);
+    return {
+        knownMoves,
+        unknownMoves,
+    };
+};
 
+export const executePlan = async (ctx: Context, plan: Plan): Promise<void> => {
     const unmovable: Array<string> = [];
 
-    for (const [source, target] of Object.entries(knownMoves)) {
+    for (const [source, target] of Object.entries(plan.knownMoves)) {
         try {
             await safeRename(source, target);
         } catch (err) {
@@ -134,23 +141,38 @@ export const run = async (props: RunProps): Promise<void> => {
         }
     }
 
-    log(`Found ${unmovable.length} unmovable files`);
+    ctx.logger(`Found ${unmovable.length} unmovable files`);
 
     for (const filepath of unmovable) {
-        const relpath = path.relative(targetDirFullPath, filepath).replace(/^(\.unmovable\/)+/, '');
-        const target = path.join(targetDirFullPath, '.unmovable', relpath);
+        const relpath = path.relative(ctx.props.targetDir, filepath).replace(/^(\.unmovable\/)+/, '');
+        const target = path.join(ctx.props.targetDir, '.unmovable', relpath);
         await safeRename(filepath, target);
     }
 
-    log(`Found ${unknownMoves.length} unknown files`);
+    ctx.logger(`Found ${plan.unknownMoves.length} unknown files`);
 
-    for (const filepath of unknownMoves) {
-        const relpath = path.relative(targetDirFullPath, filepath).replace(/^(\.unknown\/)+/, '');
-        const target = path.join(targetDirFullPath, '.unknown', relpath);
+    for (const filepath of plan.unknownMoves) {
+        const relpath = path.relative(ctx.props.targetDir, filepath).replace(/^(\.unknown\/)+/, '');
+        const target = path.join(ctx.props.targetDir, '.unknown', relpath);
         await safeRename(filepath, target);
     }
+};
 
-    log('Done, exiting cleanly');
+export const run = async (props: RunProps): Promise<void> => {
+    const ctx = {
+        logger: getLogger(props.verbose),
+        props,
+    };
+
+    ctx.logger(`Starting targeting dir ${ctx.props.targetDir}`);
+
+    const plan = await generatePlan(ctx);
+
+    ctx.logger(`Found ${Object.keys(plan.knownMoves).length} files`);
+
+    await executePlan(ctx, plan);
+
+    ctx.logger('Done, exiting cleanly');
 };
 
 export const main = async (args: Array<string>): Promise<void> => {
@@ -177,6 +199,6 @@ export const main = async (args: Array<string>): Promise<void> => {
 
     await run({
         verbose: parsedArgs.verbose || false,
-        targetDir,
+        targetDir: path.resolve(targetDir),
     });
 };
