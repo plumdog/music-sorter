@@ -127,6 +127,8 @@ export const generatePlan = async (ctx: Context): Promise<Plan> => {
 };
 
 export const executePlan = async (ctx: Context, plan: Plan): Promise<void> => {
+    ctx.logger(`Found ${Object.keys(plan.knownMoves).length} files`);
+
     const unmovable: Array<string> = [];
 
     for (const [source, target] of Object.entries(plan.knownMoves)) {
@@ -167,8 +169,6 @@ export const run = async (props: RunProps): Promise<void> => {
     ctx.logger(`Starting targeting dir ${ctx.props.targetDir}`);
 
     const plan = await generatePlan(ctx);
-
-    ctx.logger(`Found ${Object.keys(plan.knownMoves).length} files`);
 
     await executePlan(ctx, plan);
 
