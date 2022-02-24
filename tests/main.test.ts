@@ -6,6 +6,8 @@ import { Promise as nodeId3 } from 'node-id3';
 
 tmp.setGracefulCleanup();
 
+const verboseTests = false;
+
 // From https://github.com/mathiasbynens/small/blob/master/mp3.mp3
 const sampleMp3 = Buffer.from('/+MYxAAAAANIAAAAAExBTUUzLjk4LjIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA', 'base64');
 
@@ -27,7 +29,7 @@ describe('run', () => {
         );
 
         await run({
-            verbose: true,
+            verbose: verboseTests,
             targetDir: dir.name,
         });
 
@@ -68,7 +70,7 @@ describe('run', () => {
         );
 
         await run({
-            verbose: true,
+            verbose: verboseTests,
             targetDir: dir.name,
         });
 
@@ -81,7 +83,68 @@ describe('run', () => {
         fs.rmdirSync(dir.name, { recursive: true });
     });
 
-    test('two files, same target', async () => {
+    test('two files, same target, same hash', async () => {
+        const dir = tmp.dirSync();
+
+        const fileContent = await nodeId3.write(
+            {
+                artist: 'a',
+                album: 'b',
+                title: 'c',
+                trackNumber: '1',
+            },
+            sampleMp3,
+        );
+
+        fs.writeFileSync(pathlib.join(dir.name, 'a_b_c1.mp3'), fileContent);
+
+        fs.writeFileSync(pathlib.join(dir.name, 'a_b_c1_again.mp3'), fileContent);
+
+        await run({
+            verbose: verboseTests,
+            targetDir: dir.name,
+        });
+
+        expect(fs.readdirSync(pathlib.join(dir.name, 'a', 'b'))).toEqual(['01 - c.mp3']);
+        expect(fs.readdirSync(pathlib.join(dir.name, '.duplicate', 'a', 'b'))).toEqual(['01 - c_c67329ed29fa99331131220769cdb5d937468caf1ffb32b9e10b0288580a8517.mp3']);
+
+        fs.rmdirSync(dir.name, { recursive: true });
+    });
+
+    test('three files, same target, same hash', async () => {
+        const dir = tmp.dirSync();
+
+        const fileContent = await nodeId3.write(
+            {
+                artist: 'a',
+                album: 'b',
+                title: 'c',
+                trackNumber: '1',
+            },
+            sampleMp3,
+        );
+
+        fs.writeFileSync(pathlib.join(dir.name, 'a_b_c1.mp3'), fileContent);
+
+        fs.writeFileSync(pathlib.join(dir.name, 'a_b_c1_again.mp3'), fileContent);
+
+        fs.writeFileSync(pathlib.join(dir.name, 'a_b_c1_again2.mp3'), fileContent);
+
+        await run({
+            verbose: verboseTests,
+            targetDir: dir.name,
+        });
+
+        expect(fs.existsSync(pathlib.join(dir.name, 'a', 'b', '01 - c.mp3'))).toEqual(true);
+        expect(fs.readdirSync(pathlib.join(dir.name, '.duplicate', 'a', 'b'))).toEqual([
+            '01 - c_c67329ed29fa99331131220769cdb5d937468caf1ffb32b9e10b0288580a8517.mp3',
+            '01 - c_c67329ed29fa99331131220769cdb5d937468caf1ffb32b9e10b0288580a8517_1.mp3',
+        ]);
+
+        fs.rmdirSync(dir.name, { recursive: true });
+    });
+
+    test('two files, same target, different hash', async () => {
         const dir = tmp.dirSync();
 
         fs.writeFileSync(
@@ -92,6 +155,7 @@ describe('run', () => {
                     album: 'b',
                     title: 'c',
                     trackNumber: '1',
+                    genre: 'A',
                 },
                 sampleMp3,
             ),
@@ -105,18 +169,77 @@ describe('run', () => {
                     album: 'b',
                     title: 'c',
                     trackNumber: '1',
+                    genre: 'B',
                 },
                 sampleMp3,
             ),
         );
 
         await run({
-            verbose: true,
+            verbose: verboseTests,
+            targetDir: dir.name,
+        });
+
+        expect(fs.readdirSync(pathlib.join(dir.name, 'a', 'b'))).toEqual(['01 - c.mp3']);
+        const unmovableFiles = fs.readdirSync(pathlib.join(dir.name, '.unmovable', 'a', 'b'));
+        expect(['01 - c_86605500d1fdc0f08790ce0f86744893657fc6c4c7fcdc326b33c3eaf320923f.mp3']).toEqual(unmovableFiles);
+
+        fs.rmdirSync(dir.name, { recursive: true });
+    });
+
+    test('three files, same target, different hash', async () => {
+        const dir = tmp.dirSync();
+
+        fs.writeFileSync(
+            pathlib.join(dir.name, 'a_b_c1.mp3'),
+            await nodeId3.write(
+                {
+                    artist: 'a',
+                    album: 'b',
+                    title: 'c',
+                    trackNumber: '1',
+                    genre: 'A',
+                },
+                sampleMp3,
+            ),
+        );
+
+        fs.writeFileSync(
+            pathlib.join(dir.name, 'a_b_c1_again.mp3'),
+            await nodeId3.write(
+                {
+                    artist: 'a',
+                    album: 'b',
+                    title: 'c',
+                    trackNumber: '1',
+                    genre: 'B',
+                },
+                sampleMp3,
+            ),
+        );
+
+        fs.writeFileSync(
+            pathlib.join(dir.name, 'a_b_c1_again2.mp3'),
+            await nodeId3.write(
+                {
+                    artist: 'a',
+                    album: 'b',
+                    title: 'c',
+                    trackNumber: '1',
+                    genre: 'C',
+                },
+                sampleMp3,
+            ),
+        );
+
+        await run({
+            verbose: verboseTests,
             targetDir: dir.name,
         });
 
         expect(fs.existsSync(pathlib.join(dir.name, 'a', 'b', '01 - c.mp3'))).toEqual(true);
-        expect(fs.existsSync(pathlib.join(dir.name, '.unmovable', 'a_b_c1_again.mp3'))).toEqual(true);
+        const unmovableFiles = fs.readdirSync(pathlib.join(dir.name, '.unmovable', 'a', 'b'));
+        expect(['01 - c_4ed21b7fe1ac8b2a8242e332fea7a38c7284567e48d080aff43d23eeb413f21b.mp3', '01 - c_86605500d1fdc0f08790ce0f86744893657fc6c4c7fcdc326b33c3eaf320923f.mp3']).toEqual(unmovableFiles);
 
         fs.rmdirSync(dir.name, { recursive: true });
     });
@@ -138,7 +261,7 @@ describe('run', () => {
         );
 
         await run({
-            verbose: true,
+            verbose: verboseTests,
             targetDir: dir.name,
         });
 
@@ -165,7 +288,7 @@ describe('main', () => {
             ),
         );
 
-        await main(['--verbose', dir.name]);
+        await main([...(verboseTests ? ['--verbose'] : []), dir.name]);
 
         expect(fs.existsSync(pathlib.join(dir.name, 'a', 'b', '01 - c.mp3'))).toEqual(true);
 

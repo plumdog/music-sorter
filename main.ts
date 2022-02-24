@@ -1,5 +1,7 @@
 import path from 'path';
-import { promises as fs } from 'fs';
+import { promises as fsPromises } from 'fs';
+import * as fs from 'fs';
+import * as crypto from 'crypto';
 
 import yargs from 'yargs';
 import { Promise as nodeId3 } from 'node-id3';
@@ -22,6 +24,11 @@ interface Mp3 {
     albumName: string;
     trackName: string;
     trackNumber: number | undefined;
+}
+
+interface Move {
+    source: string;
+    target: string;
 }
 
 const inspectPossibleMp3 = async (filepath: string): Promise<Mp3 | undefined> => {
@@ -47,14 +54,15 @@ const inspectPossibleMp3 = async (filepath: string): Promise<Mp3 | undefined> =>
 
 class TargetExistsError extends Error {}
 
-const safeRename = async (source: string, target: string): Promise<void> => {
+const safeRename = async (move: Move): Promise<void> => {
+    const { source, target } = move;
     if (source === target) {
         return;
     }
 
     let targetExists = true;
     try {
-        await fs.access(target);
+        await fsPromises.access(target);
     } catch (err) {
         targetExists = false;
         // This is good, means we can move the file without clobbering
@@ -65,11 +73,11 @@ const safeRename = async (source: string, target: string): Promise<void> => {
         throw new TargetExistsError('Target exists');
     }
 
-    await fs.mkdir(path.dirname(target), {
+    await fsPromises.mkdir(path.dirname(target), {
         recursive: true,
     });
 
-    await fs.rename(source, target);
+    await fsPromises.rename(source, target);
 };
 
 const safeFilePartName = (name: string): string => {
@@ -126,37 +134,147 @@ export const generatePlan = async (ctx: Context): Promise<Plan> => {
     };
 };
 
+const appendToFilenameHandleExtension = (filepath: string, append: string): string => {
+    const parts = path.parse(filepath);
+    return path.join(parts.dir, `${parts.name}${append}${parts.ext}`);
+};
+
+const handleUnmovableFiles = async (ctx: Context, files: UnmovableFiles): Promise<void> => {
+    for (const fileSet of files.fileSets) {
+        for (const unmovable of fileSet.unmovables) {
+            const desired = fileSet.blocker.filepath;
+            const desiredRelpath = path.relative(ctx.props.targetDir, desired);
+            const unmovableDirectoryName = fileSet.blocker.hash === unmovable.hash ? '.duplicate' : '.unmovable';
+            const newTargetPlain = path.join(ctx.props.targetDir, unmovableDirectoryName, desiredRelpath);
+            const newTargetWithHash = appendToFilenameHandleExtension(newTargetPlain, `_${unmovable.hash}`);
+            let appendInt: undefined | number = undefined;
+            while (true) {
+                try {
+                    await safeRename({
+                        source: unmovable.filepath,
+                        target: typeof appendInt === 'undefined' ? newTargetWithHash : appendToFilenameHandleExtension(newTargetWithHash, `_${appendInt}`),
+                    });
+                } catch (err: unknown) {
+                    if (err instanceof TargetExistsError) {
+                        if (typeof appendInt === 'undefined') {
+                            appendInt = 1;
+                        } else {
+                            appendInt++;
+                        }
+                        continue;
+                    } else {
+                        throw err;
+                    }
+                }
+                break;
+            }
+        }
+    }
+};
+
+const handleUnknownFile = async (ctx: Context, filepath: string): Promise<void> => {
+    const relpath = path.relative(ctx.props.targetDir, filepath).replace(/^(\.unknown\/)+/, '');
+    const target = path.join(ctx.props.targetDir, '.unknown', relpath);
+    await safeRename({
+        source: filepath,
+        target,
+    });
+};
+
+interface FileAndHash {
+    filepath: string;
+    hash: string;
+}
+
+interface UnmovableFileSet {
+    blocker: FileAndHash;
+    unmovables: Array<FileAndHash>;
+}
+
+const hashFile = (filepath: string, hashType = 'sha256'): Promise<string> => {
+    return new Promise((res, rej) => {
+        const sum = crypto.createHash(hashType);
+        const stream = fs.createReadStream(filepath);
+        stream.on('error', (err: Error) => {
+            rej(err);
+        });
+        stream.on('data', (chunk: Buffer | string) => {
+            sum.update(chunk);
+        });
+        stream.on('end', () => {
+            res(sum.digest('hex'));
+        });
+    });
+};
+
+class UnmovableFiles {
+    readonly _fileSets: Record<string, UnmovableFileSet>;
+
+    constructor() {
+        this._fileSets = {};
+    }
+
+    async addUnmovableFile(desiredPath: string, currentPath: string): Promise<void> {
+        const toAdd = {
+            filepath: currentPath,
+            hash: await hashFile(currentPath),
+        };
+        const fileSet: UnmovableFileSet | undefined = this._fileSets[desiredPath];
+        if (typeof fileSet === 'undefined') {
+            this._fileSets[desiredPath] = {
+                blocker: {
+                    filepath: desiredPath,
+                    hash: await hashFile(desiredPath),
+                },
+                unmovables: [toAdd],
+            };
+        } else {
+            if (fileSet.blocker.filepath !== desiredPath) {
+                throw new Error(`Retrieved fileset has a blocker for a different path, blocker.filepath=${fileSet.blocker.filepath}, desiredPath=${desiredPath}`);
+            }
+            fileSet.unmovables.push(toAdd);
+        }
+    }
+
+    get fileSets(): Array<UnmovableFileSet> {
+        return Object.values(this._fileSets);
+    }
+
+    get totalUnmovableFiles(): number {
+        let count = 0;
+        for (const fileSet of this.fileSets) {
+            count += fileSet.unmovables.length;
+        }
+        return count;
+    }
+}
+
 export const executePlan = async (ctx: Context, plan: Plan): Promise<void> => {
     ctx.logger(`Found ${Object.keys(plan.knownMoves).length} files`);
 
-    const unmovable: Array<string> = [];
+    const unmovable = new UnmovableFiles();
 
     for (const [source, target] of Object.entries(plan.knownMoves)) {
         try {
-            await safeRename(source, target);
+            await safeRename({
+                source,
+                target,
+            });
         } catch (err) {
             if (err instanceof TargetExistsError) {
-                unmovable.push(source);
+                await unmovable.addUnmovableFile(target, source);
             } else {
                 throw err;
             }
         }
     }
 
-    ctx.logger(`Found ${unmovable.length} unmovable files`);
-
-    for (const filepath of unmovable) {
-        const relpath = path.relative(ctx.props.targetDir, filepath).replace(/^(\.unmovable\/)+/, '');
-        const target = path.join(ctx.props.targetDir, '.unmovable', relpath);
-        await safeRename(filepath, target);
-    }
+    ctx.logger(`Found ${unmovable.totalUnmovableFiles} unmovable files`);
+    await handleUnmovableFiles(ctx, unmovable);
 
     ctx.logger(`Found ${plan.unknownMoves.length} unknown files`);
-
     for (const filepath of plan.unknownMoves) {
-        const relpath = path.relative(ctx.props.targetDir, filepath).replace(/^(\.unknown\/)+/, '');
-        const target = path.join(ctx.props.targetDir, '.unknown', relpath);
-        await safeRename(filepath, target);
+        await handleUnknownFile(ctx, filepath);
     }
 };
 
