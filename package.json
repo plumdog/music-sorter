@@ -7,14 +7,14 @@
     "build": "rm -rf build/ && npm run -- tsc --project ./tsconfig.dist.json --noEmitOnError --outDir ./build && cp package.json package-lock.json README.md ./build/ && (cd ./build && npm ci --only=production)",
     "package": "npm run build && rm -rf dist/ && mkdir -p dist && npm run -- pkg ./build --targets=node14-linux-x64,node14-macos-x64,node14-win-x64 --out-path ./dist",
     "pkg": "pkg",
-    "compile": "npm run tsc --noEmitOnError",
+    "compile": "rm -rf ./_build/ && npm run -- tsc --noEmitOnError --outDir ./_build/",
     "version": "auto-changelog -p && git add CHANGELOG.md",
     "test": "jest",
     "eslint": "eslint",
     "lint": "eslint '**/*.ts' --fix",
     "lint-check": "eslint '**/*.ts' --max-warnings 0",
     "tsc": "tsc",
-    "dev-run": "npm run compile && node ./bin.js"
+    "dev-run": "npm run compile && node ./_build/bin.js"
   },
   "author": "",
   "license": "MIT",
