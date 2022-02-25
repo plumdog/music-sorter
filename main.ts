@@ -1,11 +1,11 @@
-import path from 'path';
+import * as path from 'path';
 import { promises as fsPromises } from 'fs';
 import * as fs from 'fs';
 import * as crypto from 'crypto';
 
-import yargs from 'yargs';
+import * as yargs from 'yargs';
 import { Promise as nodeId3 } from 'node-id3';
-import walk from 'walkdir';
+import * as walk from 'walkdir';
 
 import { ArgumentsError } from './errors';
 
@@ -301,8 +301,7 @@ export const main = async (args: Array<string>): Promise<void> => {
         .describe('verbose', 'Be verbose')
         .usage('Usage: $0 <target> [...options]')
         .strict()
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
-        .fail((msg: string, err: Error | null, yargsObj: yargs.Argv): void => {
+        .fail((msg: string, err: Error | null): void => {
             /* istanbul ignore next */
             if (err) throw err;
             throw new ArgumentsError(msg);

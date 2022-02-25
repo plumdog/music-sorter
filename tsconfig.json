@@ -2,8 +2,8 @@
   "compilerOptions": {
     "target": "ES2019",
     "typeRoots": ["./node_modules/@types"],
+    "allowJs": false,
     "checkJs": false,
-    "noUnusedParameters": false,
     "moduleResolution": "node"
   },
   "exclude": ["build/**/*", "coverage/**/*"],
