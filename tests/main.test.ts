@@ -386,7 +386,11 @@ describe('main', () => {
     });
 
     test('no arg', async () => {
-        await expect(main(['--verbose'])).rejects.toEqual(new Error('UnknownError: Expected one positional argument'));
+        await expect(main(['--verbose'])).rejects.toEqual(new Error('UnknownError: Expected one positional argument, found none'));
+    });
+
+    test('two args', async () => {
+        await expect(main(['--verbose', 'arg1', 'arg2'])).rejects.toEqual(new Error('UnknownError: Expected one positional argument, found 2'));
     });
 
     test('bad args', async () => {
