@@ -110,6 +110,8 @@ export const generatePlan = async (ctx: Context): Promise<Plan> => {
         }
     }
 
+    filesOnly.sort();
+
     const inspected: Record<string, Mp3 | undefined> = {};
 
     for (const filepath of filesOnly) {
