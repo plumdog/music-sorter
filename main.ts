@@ -311,11 +311,15 @@ export const main = async (args: Array<string>): Promise<void> => {
 
     const positionalArgs: Array<string> = parsedArgs._.map((arg: string | number): string => `${arg}`);
 
-    if (positionalArgs.length !== 1) {
-        throw new ArgumentsError('Expected one positional argument');
+    const targetDir: string | undefined = positionalArgs[0];
+
+    if (!targetDir) {
+        throw new ArgumentsError('Expected one positional argument, found none');
     }
 
-    const targetDir: string = positionalArgs[0];
+    if (positionalArgs.length > 1) {
+        throw new ArgumentsError(`Expected one positional argument, found ${positionalArgs.length}`);
+    }
 
     await run({
         verbose: parsedArgs.verbose || false,

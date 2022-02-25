@@ -9,5 +9,5 @@ export class ApplicationError extends Error {
 }
 
 export class ArgumentsError extends ApplicationError {
-    readonly prefix = 'ArgumentsError';
+    override readonly prefix = 'ArgumentsError';
 }
